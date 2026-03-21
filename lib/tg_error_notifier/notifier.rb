@@ -30,6 +30,20 @@ module TgErrorNotifier
       { sent: false, status: :failed, reason: e.class.name, error: e.message }
     end
 
+    def notify_message(message:, level:, source:, context: {})
+      enabled_check = enabled_status
+      unless enabled_check[:enabled]
+        log("skipped: #{enabled_check[:reason]}")
+        return { sent: false, status: :skipped, reason: enabled_check[:reason] }
+      end
+
+      payload = build_message_payload(message: message, level: level, source: source, context: context)
+      send_payload(payload)
+    rescue StandardError => e
+      log("notify_message failed: #{e.class}: #{e.message}")
+      { sent: false, status: :failed, reason: e.class.name, error: e.message }
+    end
+
     private
 
     attr_reader :config
@@ -61,7 +75,11 @@ module TgErrorNotifier
       request["Content-Type"] = "application/json"
       request.body = payload.to_json
 
-      http = Net::HTTP.new(uri.host, uri.port)
+      http = if config.proxy?
+        Net::HTTP.new(uri.host, uri.port, resolve(config.proxy_addr), resolve(config.proxy_port).to_i, resolve(config.proxy_user), resolve(config.proxy_pass))
+      else
+        Net::HTTP.new(uri.host, uri.port)
+      end
       http.use_ssl = uri.scheme == "https"
       http.open_timeout = config.open_timeout
       http.read_timeout = config.read_timeout
@@ -103,6 +121,23 @@ module TgErrorNotifier
 
       formatted = context.map { |k, v| "<b>#{escape(k.to_s)}:</b> #{escape(v.to_s)}" }
       formatted.join("\n")
+    end
+
+    def build_message_payload(message:, level:, source:, context: {})
+      text = [
+        "<b>ℹ️ #{escape(resolve(config.app_name).to_s)}: #{escape(resolve(config.environment).to_s)}</b>",
+        "<b>Source:</b> #{escape(source.to_s)}",
+        "<b>Level:</b> <code>#{escape(level.to_s)}</code>",
+        "<b>Message:</b> #{escape(message.to_s)}",
+        context_block(context)
+      ].compact.join("\n")
+
+      {
+        chat_id: resolve(config.chat_id),
+        text: truncate(text),
+        parse_mode: "HTML",
+        disable_web_page_preview: true
+      }
     end
 
     def truncate(text)

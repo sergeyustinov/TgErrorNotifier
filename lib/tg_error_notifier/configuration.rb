@@ -15,7 +15,11 @@ module TgErrorNotifier
       :read_timeout,
       :logger,
       :include_backtrace,
-      :active_job_enabled
+      :active_job_enabled,
+      :proxy_addr,
+      :proxy_port,
+      :proxy_user,
+      :proxy_pass
 
     def initialize
       @enabled = true
@@ -36,6 +40,14 @@ module TgErrorNotifier
       @logger = nil
       @include_backtrace = true
       @active_job_enabled = true
+      @proxy_addr = nil
+      @proxy_port = nil
+      @proxy_user = nil
+      @proxy_pass = nil
+    end
+
+    def proxy?
+      proxy_addr.present? && proxy_port.present?
     end
   end
 end

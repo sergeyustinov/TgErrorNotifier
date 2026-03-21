@@ -90,3 +90,15 @@ end
 - `{ sent: true, status: :sent, code: 200 }`
 - `{ sent: false, status: :skipped, reason: "missing_chat_id" }`
 - `{ sent: false, status: :failed, reason: "telegram_api_error", code: 400, body: "..." }`
+
+## Manual message
+```ruby
+TgErrorNotifier.capture_message(
+  "Background sync started",
+  level: :info,
+  source: "custom",
+  context: { feature: "sync", user_id: current_user&.id }
+)
+```
+
+`capture_message` returns the same diagnostic hash format as `capture_exception`.

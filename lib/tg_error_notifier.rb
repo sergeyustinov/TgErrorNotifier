@@ -27,6 +27,11 @@ module TgErrorNotifier
       notify(exception: exception, source: source, context: context)
     end
 
+    # API similar to Sentry.capture_message("text")
+    def capture_message(message, level: :info, source: "manual", context: {})
+      notifier.notify_message(message: message, level: level, source: source, context: context)
+    end
+
     private
 
     def notifier
