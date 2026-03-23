@@ -3,6 +3,8 @@
 require "rails"
 require_relative "tg_error_notifier/version"
 require_relative "tg_error_notifier/configuration"
+require_relative "tg_error_notifier/grouper"
+require_relative "tg_error_notifier/topic_manager"
 require_relative "tg_error_notifier/notifier"
 require_relative "tg_error_notifier/middleware"
 require_relative "tg_error_notifier/subscriber"
@@ -30,6 +32,11 @@ module TgErrorNotifier
     # API similar to Sentry.capture_message("text")
     def capture_message(message, level: :info, source: "manual", context: {})
       notifier.notify_message(message: message, level: level, source: source, context: context)
+    end
+
+    def reset!
+      @configuration = nil
+      @notifier = nil
     end
 
     private

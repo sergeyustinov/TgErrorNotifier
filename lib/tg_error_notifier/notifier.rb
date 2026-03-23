@@ -23,21 +23,54 @@ module TgErrorNotifier
         return { sent: false, status: :skipped, reason: "ignored_exception" }
       end
 
-      payload = build_payload(exception: exception, source: source, context: context)
+      key = nil
+      thread_id = nil
+      suppressed_count = 0
+
+      if config.topics_enabled || config.grouping_enabled
+        key = grouper.grouping_key(exception)
+      end
+
+      if config.topics_enabled
+        thread_id = topic_manager.thread_id_for(key, exception)
+      end
+
+      if config.grouping_enabled
+        result = grouper.process(key: key, thread_id: thread_id)
+        if result[:action] == :suppress
+          return { sent: false, status: :suppressed }
+        end
+        suppressed_count = result[:count]
+        thread_id = result[:thread_id] || thread_id
+      end
+
+      payload = build_payload(
+        exception: exception,
+        source: source,
+        context: context,
+        thread_id: thread_id,
+        suppressed_count: suppressed_count
+      )
       send_payload(payload)
     rescue StandardError => e
       log("notify failed: #{e.class}: #{e.message}")
       { sent: false, status: :failed, reason: e.class.name, error: e.message }
     end
 
-    def notify_message(message:, level:, source:, context: {})
+    def notify_message(message:, level:, source:, context: {}, thread_id: nil)
       enabled_check = enabled_status
       unless enabled_check[:enabled]
         log("skipped: #{enabled_check[:reason]}")
         return { sent: false, status: :skipped, reason: enabled_check[:reason] }
       end
 
-      payload = build_message_payload(message: message, level: level, source: source, context: context)
+      payload = build_message_payload(
+        message: message,
+        level: level,
+        source: source,
+        context: context,
+        thread_id: thread_id
+      )
       send_payload(payload)
     rescue StandardError => e
       log("notify_message failed: #{e.class}: #{e.message}")
@@ -47,6 +80,14 @@ module TgErrorNotifier
     private
 
     attr_reader :config
+
+    def grouper
+      @grouper ||= Grouper.new(window: config.grouping_window)
+    end
+
+    def topic_manager
+      @topic_manager ||= TopicManager.new(config)
+    end
 
     def enabled_status
       return { enabled: false, reason: "disabled" } unless resolve(config.enabled)
@@ -93,14 +134,21 @@ module TgErrorNotifier
       { sent: false, status: :failed, reason: "telegram_api_error", code: response.code.to_i, body: response.body.to_s }
     end
 
-    def build_payload(exception:, source:, context: {})
-      text = [
+    def build_payload(exception:, source:, context: {}, thread_id: nil, suppressed_count: 0)
+      parts = [
         "<b>🚨 #{escape(resolve(config.app_name).to_s)}: #{escape(resolve(config.environment).to_s)}</b>",
         "<b>Source:</b> #{escape(source.to_s)}",
         "<b>Exception:</b> <code>#{escape(exception.class.name)}</code>",
-        "<b>Message:</b> #{escape(exception.message.to_s)}",
-        context_block(context)
-      ].compact.join("\n")
+        "<b>Message:</b> #{escape(exception.message.to_s)}"
+      ]
+
+      if suppressed_count > 0
+        parts << "<b>🔁 +#{suppressed_count} more in last #{config.grouping_window}s</b>"
+      end
+
+      parts << context_block(context)
+
+      text = parts.compact.join("\n")
 
       if config.include_backtrace && exception.backtrace
         lines = exception.backtrace.first(config.max_backtrace_lines)
@@ -108,12 +156,14 @@ module TgErrorNotifier
         text = "#{text}\n<b>Backtrace:</b>\n<pre>#{bt}</pre>"
       end
 
-      {
+      payload = {
         chat_id: resolve(config.chat_id),
         text: truncate(text),
         parse_mode: "HTML",
         disable_web_page_preview: true
       }
+      payload[:message_thread_id] = thread_id if thread_id
+      payload
     end
 
     def context_block(context)
@@ -123,7 +173,7 @@ module TgErrorNotifier
       formatted.join("\n")
     end
 
-    def build_message_payload(message:, level:, source:, context: {})
+    def build_message_payload(message:, level:, source:, context: {}, thread_id: nil)
       text = [
         "<b>ℹ️ #{escape(resolve(config.app_name).to_s)}: #{escape(resolve(config.environment).to_s)}</b>",
         "<b>Source:</b> #{escape(source.to_s)}",
@@ -132,12 +182,14 @@ module TgErrorNotifier
         context_block(context)
       ].compact.join("\n")
 
-      {
+      payload = {
         chat_id: resolve(config.chat_id),
         text: truncate(text),
         parse_mode: "HTML",
         disable_web_page_preview: true
       }
+      payload[:message_thread_id] = thread_id if thread_id
+      payload
     end
 
     def truncate(text)

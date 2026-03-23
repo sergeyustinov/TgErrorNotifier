@@ -19,7 +19,11 @@ module TgErrorNotifier
       :proxy_addr,
       :proxy_port,
       :proxy_user,
-      :proxy_pass
+      :proxy_pass,
+      :grouping_enabled,
+      :grouping_window,
+      :topics_enabled,
+      :topic_icon_color
 
     def initialize
       @enabled = true
@@ -44,6 +48,10 @@ module TgErrorNotifier
       @proxy_port = nil
       @proxy_user = nil
       @proxy_pass = nil
+      @grouping_enabled = false
+      @grouping_window = 60
+      @topics_enabled = false
+      @topic_icon_color = nil
     end
 
     def proxy?

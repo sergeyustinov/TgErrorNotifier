@@ -22,6 +22,10 @@ module TgErrorNotifier
         config.logger = options.logger unless options.logger.nil?
         config.include_backtrace = options.include_backtrace unless options.include_backtrace.nil?
         config.active_job_enabled = options.active_job_enabled unless options.active_job_enabled.nil?
+        config.grouping_enabled = options.grouping_enabled unless options.grouping_enabled.nil?
+        config.grouping_window = options.grouping_window unless options.grouping_window.nil?
+        config.topics_enabled = options.topics_enabled unless options.topics_enabled.nil?
+        config.topic_icon_color = options.topic_icon_color unless options.topic_icon_color.nil?
       end
     end
 

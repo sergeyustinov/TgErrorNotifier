@@ -70,6 +70,42 @@ Examples:
 - Ensure bot has permission to send messages.
 - Put value into `TELEGRAM_ERRORS_CHAT_ID` and run a smoke test.
 
+## Error grouping
+
+Group identical errors to avoid flooding. When the same exception repeats within a time window, only the first message is sent — subsequent occurrences are suppressed and reported as a count in the next message.
+
+```ruby
+TgErrorNotifier.configure do |config|
+  config.grouping_enabled = true
+  config.grouping_window = 60 # seconds (default)
+end
+```
+
+Errors are grouped by exception class + normalized message (IDs and UUIDs are replaced with placeholders for better deduplication).
+
+## Forum topics (threads)
+
+Automatically create a Telegram Forum topic (thread) per unique error type. Each error gets its own topic in a supergroup with Forum Topics enabled.
+
+```ruby
+TgErrorNotifier.configure do |config|
+  config.topics_enabled = true
+  config.topic_icon_color = 0xFB6F5F # red (default), optional
+end
+```
+
+**Requirements:** The chat must be a supergroup with Forum Topics enabled. The bot must have `can_manage_topics` admin permission.
+
+You can combine both features — errors will be grouped within their respective topics:
+
+```ruby
+TgErrorNotifier.configure do |config|
+  config.grouping_enabled = true
+  config.grouping_window = 60
+  config.topics_enabled = true
+end
+```
+
 ## Manual notification
 ```ruby
 begin
