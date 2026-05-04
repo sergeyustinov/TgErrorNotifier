@@ -46,6 +46,12 @@ module TgErrorNotifier
       end
     end
 
+    def rollback(key)
+      @mutex.synchronize do
+        @entries.delete(key)
+      end
+    end
+
     def grouping_key(exception)
       "#{exception.class.name}:#{normalize_message(exception.message)}"
     end

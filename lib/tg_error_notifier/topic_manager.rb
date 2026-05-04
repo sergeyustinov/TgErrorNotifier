@@ -2,6 +2,7 @@
 
 require "net/http"
 require "json"
+require "set"
 
 module TgErrorNotifier
   class TopicManager
@@ -11,18 +12,32 @@ module TgErrorNotifier
     def initialize(config)
       @config = config
       @mutex = Mutex.new
+      @condition = ConditionVariable.new
       @topics = {} # grouping_key => message_thread_id
+      @creating = Set.new
     end
 
     def thread_id_for(key, exception)
+      name = nil
+
       @mutex.synchronize do
+        # Wait if another thread is already creating this topic
+        while @creating.include?(key)
+          @condition.wait(@mutex, 10)
+        end
+
         return @topics[key] if @topics.key?(key)
+
+        @creating.add(key)
+        name = topic_name(exception)
       end
 
-      thread_id = create_topic(topic_name(exception))
+      thread_id = create_topic(name)
 
-      if thread_id
-        @mutex.synchronize { @topics[key] = thread_id }
+      @mutex.synchronize do
+        @topics[key] = thread_id if thread_id
+        @creating.delete(key)
+        @condition.broadcast
       end
 
       thread_id

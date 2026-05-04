@@ -51,7 +51,13 @@ module TgErrorNotifier
         thread_id: thread_id,
         suppressed_count: suppressed_count
       )
-      send_payload(payload)
+      response = send_payload(payload)
+
+      if !response[:sent] && config.grouping_enabled && key
+        grouper.rollback(key)
+      end
+
+      response
     rescue StandardError => e
       log("notify failed: #{e.class}: #{e.message}")
       { sent: false, status: :failed, reason: e.class.name, error: e.message }
