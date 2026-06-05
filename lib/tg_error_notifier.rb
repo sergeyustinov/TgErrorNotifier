@@ -30,8 +30,10 @@ module TgErrorNotifier
     end
 
     # API similar to Sentry.capture_message("text")
-    def capture_message(message, level: :info, source: "manual", context: {})
-      notifier.notify_message(message: message, level: level, source: source, context: context)
+    # topic: имя форум-топика — сообщение уйдёт в отдельную тему группы
+    # (топик создаётся один раз и переиспользуется через topic_store_read/write)
+    def capture_message(message, level: :info, source: "manual", context: {}, topic: nil)
+      notifier.notify_message(message: message, level: level, source: source, context: context, topic: topic)
     end
 
     def reset!

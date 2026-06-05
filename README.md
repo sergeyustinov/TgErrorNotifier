@@ -138,3 +138,22 @@ TgErrorNotifier.capture_message(
 ```
 
 `capture_message` returns the same diagnostic hash format as `capture_exception`.
+
+## Named topics for messages
+
+Send messages to a dedicated Forum topic by name. The topic is created on first use (blue icon) and reused afterwards:
+
+```ruby
+TgErrorNotifier.capture_message("New account: #{account.name}", topic: "Registrations")
+```
+
+Since the topic → thread_id mapping is cached in memory per process, configure a persistent store so restarts and multiple processes (Puma workers, Sidekiq) don't create duplicate topics:
+
+```ruby
+TgErrorNotifier.configure do |config|
+  config.topic_store_read  = ->(name) { MyKeyValueStore.get("tg_topic:#{name}") }
+  config.topic_store_write = ->(name, thread_id) { MyKeyValueStore.set("tg_topic:#{name}", thread_id) }
+end
+```
+
+Without a store everything still works, but each process creates its own topic. Named topics work independently of `topics_enabled` (which controls per-exception topics). Requirements are the same: forum supergroup + `can_manage_topics` bot permission.

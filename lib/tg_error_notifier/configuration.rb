@@ -23,7 +23,9 @@ module TgErrorNotifier
       :grouping_enabled,
       :grouping_window,
       :topics_enabled,
-      :topic_icon_color
+      :topic_icon_color,
+      :topic_store_read,
+      :topic_store_write
 
     def initialize
       @enabled = true
@@ -52,6 +54,12 @@ module TgErrorNotifier
       @grouping_window = 60
       @topics_enabled = false
       @topic_icon_color = nil
+      # Persistent storage for named topics (created via capture_message topic:).
+      # Without a store each process/restart would create a duplicate forum topic.
+      #   topic_store_read  = ->(name) { ... }        # returns thread_id or nil
+      #   topic_store_write = ->(name, thread_id) { ... }
+      @topic_store_read = nil
+      @topic_store_write = nil
     end
 
     def proxy?

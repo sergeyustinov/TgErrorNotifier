@@ -7,6 +7,7 @@ require "set"
 module TgErrorNotifier
   class TopicManager
     ICON_COLOR_RED = 0xFB6F5F
+    ICON_COLOR_BLUE = 0x6FB9F0
     MAX_TOPIC_NAME = 128
 
     def initialize(config)
@@ -43,15 +44,74 @@ module TgErrorNotifier
       thread_id
     end
 
+    # Resolve thread_id for an explicitly named topic (capture_message topic: "...").
+    # Unlike exception topics, named topics survive restarts via the configured
+    # topic_store_read/topic_store_write callbacks.
+    def thread_id_for_name(name)
+      key = "topic:#{name}"
+
+      @mutex.synchronize do
+        while @creating.include?(key)
+          @condition.wait(@mutex, 10)
+        end
+
+        return @topics[key] if @topics.key?(key)
+
+        stored = store_read(name)
+        if stored
+          @topics[key] = stored
+          return stored
+        end
+
+        @creating.add(key)
+      end
+
+      thread_id = create_topic(truncate_name(name), icon_color: @config.topic_icon_color || ICON_COLOR_BLUE)
+
+      @mutex.synchronize do
+        if thread_id
+          @topics[key] = thread_id
+          store_write(name, thread_id)
+        end
+        @creating.delete(key)
+        @condition.broadcast
+      end
+
+      thread_id
+    end
+
     private
 
-    def topic_name(exception)
-      name = "#{exception.class.name}: #{exception.message}"
-      name = name.gsub(/\s+/, " ").strip
+    def store_read(name)
+      reader = @config.topic_store_read
+      return nil unless reader
+
+      value = reader.call(name)
+      value.to_s.empty? ? nil : value.to_i
+    rescue StandardError => e
+      log("topic_store_read failed: #{e.class}: #{e.message}")
+      nil
+    end
+
+    def store_write(name, thread_id)
+      writer = @config.topic_store_write
+      return unless writer
+
+      writer.call(name, thread_id)
+    rescue StandardError => e
+      log("topic_store_write failed: #{e.class}: #{e.message}")
+    end
+
+    def truncate_name(name)
+      name = name.to_s.gsub(/\s+/, " ").strip
       name.length > MAX_TOPIC_NAME ? "#{name[0...MAX_TOPIC_NAME - 1]}…" : name
     end
 
-    def create_topic(name)
+    def topic_name(exception)
+      truncate_name("#{exception.class.name}: #{exception.message}")
+    end
+
+    def create_topic(name, icon_color: nil)
       token = resolve(@config.bot_token)
       chat_id = resolve(@config.chat_id)
       uri = URI("#{resolve(@config.api_base)}/bot#{token}/createForumTopic")
@@ -59,7 +119,7 @@ module TgErrorNotifier
       payload = {
         chat_id: chat_id,
         name: name,
-        icon_color: @config.topic_icon_color || ICON_COLOR_RED
+        icon_color: icon_color || @config.topic_icon_color || ICON_COLOR_RED
       }
 
       request = Net::HTTP::Post.new(uri)

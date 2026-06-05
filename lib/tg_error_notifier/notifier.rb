@@ -63,12 +63,14 @@ module TgErrorNotifier
       { sent: false, status: :failed, reason: e.class.name, error: e.message }
     end
 
-    def notify_message(message:, level:, source:, context: {}, thread_id: nil)
+    def notify_message(message:, level:, source:, context: {}, topic: nil, thread_id: nil)
       enabled_check = enabled_status
       unless enabled_check[:enabled]
         log("skipped: #{enabled_check[:reason]}")
         return { sent: false, status: :skipped, reason: enabled_check[:reason] }
       end
+
+      thread_id ||= topic_manager.thread_id_for_name(topic) if topic
 
       payload = build_message_payload(
         message: message,
