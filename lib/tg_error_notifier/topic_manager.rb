@@ -9,6 +9,7 @@ module TgErrorNotifier
     ICON_COLOR_RED = 0xFB6F5F
     ICON_COLOR_BLUE = 0x6FB9F0
     MAX_TOPIC_NAME = 128
+    MAX_STORE_KEY = 200
 
     def initialize(config)
       @config = config
@@ -20,6 +21,7 @@ module TgErrorNotifier
 
     def thread_id_for(key, exception)
       name = nil
+      store_key = "exception:#{key}"[0...MAX_STORE_KEY]
 
       @mutex.synchronize do
         # Wait if another thread is already creating this topic
@@ -29,6 +31,14 @@ module TgErrorNotifier
 
         return @topics[key] if @topics.key?(key)
 
+        # Тема ошибки должна пережить рестарт и быть общей для всех
+        # процессов: иначе каждый puma/sidekiq-воркер заводит свой дубль
+        stored = store_read(store_key)
+        if stored
+          @topics[key] = stored
+          return stored
+        end
+
         @creating.add(key)
         name = topic_name(exception)
       end
@@ -36,7 +46,10 @@ module TgErrorNotifier
       thread_id = create_topic(name)
 
       @mutex.synchronize do
-        @topics[key] = thread_id if thread_id
+        if thread_id
+          @topics[key] = thread_id
+          store_write(store_key, thread_id)
+        end
         @creating.delete(key)
         @condition.broadcast
       end

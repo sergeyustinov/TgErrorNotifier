@@ -7,6 +7,10 @@ require "cgi"
 module TgErrorNotifier
   class Notifier
     MAX_MESSAGE_LENGTH = 3800
+    # Отдельные поля (сообщение исключения, значения контекста) режем заранее,
+    # чтобы гарантированно осталось место под бэктрейс и закрывающие теги
+    MAX_FIELD_LENGTH = 900
+    HTML_TAGS = %w[pre code b i u s].freeze
 
     def initialize(config)
       @config = config
@@ -116,7 +120,7 @@ module TgErrorNotifier
       ignored.include?(exception.class.name)
     end
 
-    def send_payload(payload)
+    def send_payload(payload, retry_plain: true)
       token = resolve(config.bot_token)
       uri = URI("#{resolve(config.api_base)}/bot#{token}/sendMessage")
 
@@ -139,15 +143,29 @@ module TgErrorNotifier
       end
 
       log("telegram api error: HTTP #{response.code} #{response.body}")
+
+      # Последний рубеж: разметка не распарсилась — шлём то же самое
+      # обычным текстом, чтобы тело сообщения дошло в любом случае
+      if retry_plain && parse_entities_error?(response)
+        plain = payload.dup
+        plain.delete(:parse_mode)
+        plain[:text] = truncate(strip_html(payload[:text]))
+        return send_payload(plain, retry_plain: false)
+      end
+
       { sent: false, status: :failed, reason: "telegram_api_error", code: response.code.to_i, body: response.body.to_s }
+    end
+
+    def parse_entities_error?(response)
+      response.code.to_i == 400 && response.body.to_s.include?("can't parse entities")
     end
 
     def build_payload(exception:, source:, context: {}, thread_id: nil, suppressed_count: 0)
       parts = [
         "<b>🚨 #{escape(resolve(config.app_name).to_s)}: #{escape(resolve(config.environment).to_s)}</b>",
-        "<b>Source:</b> #{escape(source.to_s)}",
+        "<b>Source:</b> #{escape(clamp(source, MAX_FIELD_LENGTH))}",
         "<b>Exception:</b> <code>#{escape(exception.class.name)}</code>",
-        "<b>Message:</b> #{escape(exception.message.to_s)}"
+        "<b>Message:</b> #{escape(clamp(exception.message, MAX_FIELD_LENGTH))}"
       ]
 
       if suppressed_count > 0
@@ -156,12 +174,19 @@ module TgErrorNotifier
 
       parts << context_block(context)
 
-      text = parts.compact.join("\n")
+      text = truncate(parts.compact.join("\n"))
 
       if config.include_backtrace && exception.backtrace
         lines = exception.backtrace.first(config.max_backtrace_lines)
-        bt = escape(lines.join("\n"))
-        text = "#{text}\n<b>Backtrace:</b>\n<pre>#{bt}</pre>"
+        header = "\n<b>Backtrace:</b>\n"
+        # Бэктрейс режем по остатку бюджета ДО оборачивания в <pre>,
+        # иначе финальный truncate обрезал бы текст внутри тега и Telegram
+        # отвечал 400 "can't find end tag corresponding to start tag pre"
+        budget = MAX_MESSAGE_LENGTH - text.length - header.length - "<pre></pre>".length
+        if budget > 100
+          bt = cut_escaped(escape(lines.join("\n")), budget)
+          text = "#{text}#{header}<pre>#{bt}</pre>"
+        end
       end
 
       payload = {
@@ -177,7 +202,7 @@ module TgErrorNotifier
     def context_block(context)
       return nil if context.nil? || context.empty?
 
-      formatted = context.map { |k, v| "<b>#{escape(k.to_s)}:</b> #{escape(v.to_s)}" }
+      formatted = context.map { |k, v| "<b>#{escape(k.to_s)}:</b> #{escape(clamp(v, MAX_FIELD_LENGTH))}" }
       formatted.join("\n")
     end
 
@@ -200,10 +225,39 @@ module TgErrorNotifier
       payload
     end
 
+    def clamp(value, limit)
+      text = value.to_s
+      text.length > limit ? "#{text[0...limit]}…" : text
+    end
+
+    # Обрезка уже экранированного текста: не оставляем хвост от «&amp;»
+    def cut_escaped(text, limit)
+      return text if text.length <= limit
+
+      text[0...limit].sub(/&[#a-zA-Z0-9]*\z/, "")
+    end
+
     def truncate(text)
       return text if text.length <= MAX_MESSAGE_LENGTH
 
-      text[0...MAX_MESSAGE_LENGTH] + "\n...truncated"
+      close_tags(cut_escaped(text, MAX_MESSAGE_LENGTH - 20)) + "\n...truncated"
+    end
+
+    # Обрезка могла оставить незакрытый тег или его половину — Telegram
+    # на таком отвечает 400 и сообщение не доходит вовсе
+    def close_tags(text)
+      text = text.sub(/<[^>]*\z/, "")
+
+      HTML_TAGS.each do |tag|
+        unclosed = text.scan("<#{tag}>").size - text.scan("</#{tag}>").size
+        unclosed.times { text += "</#{tag}>" }
+      end
+
+      text
+    end
+
+    def strip_html(text)
+      CGI.unescapeHTML(text.to_s.gsub(/<[^>]*>/, ""))
     end
 
     def resolve(value)
