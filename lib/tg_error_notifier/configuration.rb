@@ -25,7 +25,8 @@ module TgErrorNotifier
       :topics_enabled,
       :topic_icon_color,
       :topic_store_read,
-      :topic_store_write
+      :topic_store_write,
+      :buttons
 
     def initialize
       @enabled = true
@@ -60,6 +61,19 @@ module TgErrorNotifier
       #   topic_store_write = ->(name, thread_id) { ... }
       @topic_store_read = nil
       @topic_store_write = nil
+      # Inline keyboard attached under the message. The gem does not interpret
+      # the buttons: whatever the host returns goes to Telegram as is, so the
+      # host is free to use url buttons, callback_data or web_app.
+      #
+      #   config.buttons = lambda do |kind:, source:, context:, fingerprint:, exception: nil, message: nil|
+      #     [[{ text: "To the board", url: "https://example.com/e/#{token}" }]]
+      #   end
+      #
+      # Return value: array of rows, each row an array of button hashes.
+      # A flat array of buttons is accepted too and becomes a single row.
+      # Return nil or [] for no keyboard. Errors raised inside are logged and
+      # the message is still delivered, without the keyboard.
+      @buttons = nil
     end
 
     def proxy?

@@ -157,3 +157,31 @@ end
 ```
 
 Without a store everything still works, but each process creates its own topic. Named topics work independently of `topics_enabled` (which controls per-exception topics). Requirements are the same: forum supergroup + `can_manage_topics` bot permission.
+
+## Buttons under the message
+
+Attach an inline keyboard to error notifications — e.g. a link that files the error as a task on your board. The gem does not interpret the buttons: whatever the callable returns is passed to Telegram as is, so `url`, `callback_data` and `web_app` buttons all work.
+
+```ruby
+TgErrorNotifier.configure do |config|
+  config.buttons = lambda do |kind:, source:, context:, fingerprint:, exception: nil, message: nil|
+    next nil unless kind == :exception
+
+    token = ErrorTaskLink.issue(exception: exception, source: source, fingerprint: fingerprint)
+    [[{ text: "\u2795 To the board", url: "https://example.com/e/#{token}" }]]
+  end
+end
+```
+
+Arguments:
+
+| key | value |
+| --- | --- |
+| `kind` | `:exception` for `capture_exception`/rescued errors, `:message` for `capture_message` |
+| `exception` | the exception (nil for `:message`) |
+| `message` | the message text (nil for `:exception`) |
+| `source` | where it came from (`"Sidekiq: MyWorker"`, `"manual"`, ...) |
+| `context` | the context hash passed to the notifier |
+| `fingerprint` | grouping key of the exception — stable across repeats, use it to deduplicate whatever the button creates (nil for `:message`) |
+
+Return an array of rows (`[[button, button], [button]]`); a flat array becomes a single row; `nil` or `[]` means no keyboard. Exceptions raised inside the callable are logged and the notification is still delivered — without the keyboard.

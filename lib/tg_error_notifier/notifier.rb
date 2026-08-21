@@ -31,7 +31,7 @@ module TgErrorNotifier
       thread_id = nil
       suppressed_count = 0
 
-      if config.topics_enabled || config.grouping_enabled
+      if config.topics_enabled || config.grouping_enabled || config.buttons
         key = grouper.grouping_key(exception)
       end
 
@@ -53,7 +53,8 @@ module TgErrorNotifier
         source: source,
         context: context,
         thread_id: thread_id,
-        suppressed_count: suppressed_count
+        suppressed_count: suppressed_count,
+        fingerprint: key
       )
       response = send_payload(payload)
 
@@ -160,7 +161,7 @@ module TgErrorNotifier
       response.code.to_i == 400 && response.body.to_s.include?("can't parse entities")
     end
 
-    def build_payload(exception:, source:, context: {}, thread_id: nil, suppressed_count: 0)
+    def build_payload(exception:, source:, context: {}, thread_id: nil, suppressed_count: 0, fingerprint: nil)
       parts = [
         "<b>🚨 #{escape(resolve(config.app_name).to_s)}: #{escape(resolve(config.environment).to_s)}</b>",
         "<b>Source:</b> #{escape(clamp(source, MAX_FIELD_LENGTH))}",
@@ -196,7 +197,40 @@ module TgErrorNotifier
         disable_web_page_preview: true
       }
       payload[:message_thread_id] = thread_id if thread_id
+      keyboard = build_keyboard(
+        kind: :exception,
+        exception: exception,
+        source: source,
+        context: context,
+        fingerprint: fingerprint
+      )
+      payload[:reply_markup] = keyboard if keyboard
       payload
+    end
+
+    # Кнопки строит хост (config.buttons) — гем не знает, куда они ведут.
+    # Сбой в колбэке не должен отменять доставку самого уведомления: об ошибке
+    # надо узнать в любом случае, кнопка — дополнение.
+    def build_keyboard(kind:, source:, context:, fingerprint:, exception: nil, message: nil)
+      return nil if config.buttons.nil?
+
+      rows = config.buttons.call(
+        kind: kind,
+        exception: exception,
+        message: message,
+        source: source,
+        context: context,
+        fingerprint: fingerprint
+      )
+      return nil if rows.nil? || rows.empty?
+
+      # Плоский список кнопок принимаем как одну строку клавиатуры.
+      rows = [rows] unless rows.first.is_a?(Array)
+
+      { inline_keyboard: rows }
+    rescue StandardError => e
+      log("buttons failed: #{e.class}: #{e.message}")
+      nil
     end
 
     def context_block(context)
@@ -222,6 +256,14 @@ module TgErrorNotifier
         disable_web_page_preview: true
       }
       payload[:message_thread_id] = thread_id if thread_id
+      keyboard = build_keyboard(
+        kind: :message,
+        message: message,
+        source: source,
+        context: context,
+        fingerprint: nil
+      )
+      payload[:reply_markup] = keyboard if keyboard
       payload
     end
 
